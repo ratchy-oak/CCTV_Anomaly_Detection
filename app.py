@@ -1,27 +1,50 @@
-import gradio as gr
 import streamlit as st
+import torch
+from torchvision.io import read_video
+from transformers import AutoTokenizer, AutoModelForVideoClassification
 
-# Load model using Gradio
-model = gr.load("models/ratchy-oak/vivit-b-16x2-kinetics400-finetuned-cctv-surveillance")
+# Load model directly
+tokenizer = AutoTokenizer.from_pretrained("ratchy-oak/vivit-b-16x2-kinetics400-finetuned-cctv-surveillance")
+model = AutoModelForVideoClassification.from_pretrained("ratchy-oak/vivit-b-16x2-kinetics400-finetuned-cctv-surveillance")
 
-# Define function for video classification
-def classify_video(video):
-    prediction = model.predict(video)
-    return prediction
+# Function to classify video
+def classify_video(video_file):
+    # Read video file
+    video_tensor, audio_tensor, info = read_video(video_file)
 
-# Define Streamlit app
+    # Preprocess video frames (resizing, normalization, etc.)
+    resized_frames = torch.nn.functional.interpolate(video_tensor, size=(224, 224))
+
+    # Perform inference on each frame and aggregate results
+    predictions = []
+    for frame in resized_frames:
+        input_tensor = frame.unsqueeze(0)  # Add batch dimension
+        with torch.no_grad():
+            logits = model(input_tensor)
+        probabilities = torch.softmax(logits, dim=1)
+        _, predicted_class = torch.max(probabilities, 1)
+        predictions.append(predicted_class.item())
+
+    # Aggregate predictions (taking the mode)
+    final_prediction = max(set(predictions), key=predictions.count)
+    
+    return final_prediction
+
+# Streamlit app
 def main():
-    st.write("# Video Classification")
-    st.write("Upload a video for classification:")
+    st.title("Video Classification")
 
-    # Define Gradio interface function
-    def gr_interface():
-        iface = gr.Interface(fn=classify_video, inputs="video", outputs="label")
-        iface.launch()
+    # Upload video
+    uploaded_file = st.file_uploader("Upload a video", type=["mp4", "avi"])
 
-    # Embed Gradio interface into Streamlit app
-    gr_interface()
+    if uploaded_file is not None:
+        # Display uploaded video
+        st.video(uploaded_file)
 
-# Run the Streamlit app
+        # Classify video when button is clicked
+        if st.button("Classify"):
+            prediction = classify_video(uploaded_file)
+            st.write("Prediction:", prediction)
+
 if __name__ == "__main__":
     main()
